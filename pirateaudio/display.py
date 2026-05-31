@@ -112,6 +112,7 @@ BUTTON_BOUNCE_TIME = 0.05
 BACKGROUND_BLUR_RADIUS = 1.5
 GRADIENT_ALPHA_MIN = 45
 GRADIENT_ALPHA_MAX = 140
+BACKGROUND_GRADIENT = None
 
 # debug
 # import PIL
@@ -202,11 +203,15 @@ def fit_text_lines(draw, text, font, max_width, max_lines=None):
 
 def apply_background_style(image):
     """adds subtle gradient overlay for better readability"""
+    global BACKGROUND_GRADIENT
     styled = image.copy().convert('RGBA')
-    draw_gradient = ImageDraw.Draw(styled, 'RGBA')
-    for y in range(styled.height):
-        alpha = int(GRADIENT_ALPHA_MIN + ((GRADIENT_ALPHA_MAX - GRADIENT_ALPHA_MIN) * y / max(styled.height - 1, 1)))
-        draw_gradient.line([(0, y), (styled.width, y)], fill=(12, 17, 28, alpha))
+    if BACKGROUND_GRADIENT is None or BACKGROUND_GRADIENT.size != styled.size:
+        BACKGROUND_GRADIENT = Image.new('RGBA', styled.size, (0, 0, 0, 0))
+        draw_gradient = ImageDraw.Draw(BACKGROUND_GRADIENT, 'RGBA')
+        for y in range(styled.height):
+            alpha = int(GRADIENT_ALPHA_MIN + ((GRADIENT_ALPHA_MAX - GRADIENT_ALPHA_MIN) * y / max(styled.height - 1, 1)))
+            draw_gradient.line([(0, y), (styled.width, y)], fill=(12, 17, 28, alpha))
+    styled.alpha_composite(BACKGROUND_GRADIENT)
     return styled
 
 
@@ -791,9 +796,9 @@ def button_hold(pin):
     mode = VOLUMIO_DICT['MODE']
     if pin == 6 and mode == 'player':
         button_b(mode, VOLUMIO_DICT['STATUS'])
-    if pin == 16 and mode in ['navigation', 'menu']:
+    elif pin == 16 and mode in ['navigation', 'menu']:
         button_x(mode, VOLUMIO_DICT['STATUS'])
-    if pin == BUTTONS[3] and mode in ['player', 'navigation', 'menu']:
+    elif pin == BUTTONS[3] and mode in ['player', 'navigation', 'menu']:
         button_y(mode, VOLUMIO_DICT['STATUS'])
 
 
