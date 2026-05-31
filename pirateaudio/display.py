@@ -108,6 +108,10 @@ OVERLAY_DICT = {
 BUTTONS = [5, 6, 16, OBJ['gpio_ybutton']['value']]
 GPIO_BUTTONS = {}
 BUTTON_HOLD_TIME = 0.25
+BUTTON_BOUNCE_TIME = 0.05
+BACKGROUND_BLUR_RADIUS = 1.5
+GRADIENT_ALPHA_MIN = 45
+GRADIENT_ALPHA_MAX = 140
 
 # debug
 # import PIL
@@ -201,7 +205,7 @@ def apply_background_style(image):
     styled = image.copy().convert('RGBA')
     draw_gradient = ImageDraw.Draw(styled, 'RGBA')
     for y in range(styled.height):
-        alpha = int(45 + ((140 - 45) * y / max(styled.height - 1, 1)))
+        alpha = int(GRADIENT_ALPHA_MIN + ((GRADIENT_ALPHA_MAX - GRADIENT_ALPHA_MIN) * y / max(styled.height - 1, 1)))
         draw_gradient.line([(0, y), (styled.width, y)], fill=(12, 17, 28, alpha))
     return styled
 
@@ -487,7 +491,7 @@ def on_push_state(*args):
 
 
     def f_textsize(text, fontsize):
-        """"helper textsize"""
+        """helper textsize"""
         w1, _ = get_text_size(draw, text, fontsize)
         return w1
 
@@ -534,7 +538,7 @@ def on_push_state(*args):
             try:  # to catch not displayable images
                 IMAGE_DICT['IMG'] = Image.open(BytesIO(response.content)).convert('RGBA')  # v.0.04 gab bei spotify probleme
                 IMAGE_DICT['IMG'] = IMAGE_DICT['IMG'].resize((IMAGE_DICT['WIDTH'], IMAGE_DICT['HEIGHT']))
-                IMAGE_DICT['IMG'] = IMAGE_DICT['IMG'].filter(ImageFilter.GaussianBlur(radius=1.5))
+                IMAGE_DICT['IMG'] = IMAGE_DICT['IMG'].filter(ImageFilter.GaussianBlur(radius=BACKGROUND_BLUR_RADIUS))
             except (ValueError, RuntimeError) as e:
                 IMAGE_DICT['IMG'] = IMAGE_DICT['BG_DEFAULT'].copy()
 
@@ -796,7 +800,7 @@ def button_hold(pin):
 for pin in BUTTONS:
     try:
         print(f'register {pin}')
-        GPIO_BUTTONS[pin] = Button(pin, pull_up=True, hold_time=BUTTON_HOLD_TIME, hold_repeat=True, bounce_time=0.05)
+        GPIO_BUTTONS[pin] = Button(pin, pull_up=True, hold_time=BUTTON_HOLD_TIME, hold_repeat=True, bounce_time=BUTTON_BOUNCE_TIME)
         GPIO_BUTTONS[pin].when_pressed = lambda pin=pin: handle_button(pin)
         GPIO_BUTTONS[pin].when_held = lambda pin=pin: button_hold(pin)
         print('success')
