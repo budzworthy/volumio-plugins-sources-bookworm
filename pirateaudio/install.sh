@@ -20,7 +20,7 @@ systemctl enable pirateaudio.service
 # Install the required packages via apt-get, install new python 3.x depencies
 echo "Installing new python 3.x dependencies for pirateaudio plugin"
 sudo apt update
-sudo apt install -y python3-rpi.gpio python3-pip python3-venv python3-pil libtevent0 libopenblas0
+sudo apt install -y python3-gpiozero python3-rpi.gpio python3-pip python3-venv python3-pil libtevent0 libopenblas0
 
 echo "Installing PIP modules"
 python3 -m venv --system-site-packages $papath/venv
