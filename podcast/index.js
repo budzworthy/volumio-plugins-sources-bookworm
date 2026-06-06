@@ -693,6 +693,7 @@ ControllerPodcast.prototype.getPodcastContent = function(uri) {
           else if (entry.image !== undefined)
             imageUrl = entry.image
 
+<<<<<<< Updated upstream
           const pubDateValue = entry.pubDate ? new Date(entry.pubDate) : null;
           const pubDateTimestamp = pubDateValue && !isNaN(pubDateValue.getTime()) ? pubDateValue.getTime() : 0;
           const pubDate = pubDateValue && pubDateTimestamp ? formatter.format(pubDateValue) : null;
@@ -706,6 +707,13 @@ ControllerPodcast.prototype.getPodcastContent = function(uri) {
             : episodeNumber > -1
               ? `${episodeNumber}`
               : '';
+=======
+          const pubDate = entry.pubDate ? formatter.format(new Date(entry.pubDate)) : null;
+          const episodeNumber = entry['itunes:episode'];
+          const seasonNumber = entry['itunes:season'];
+
+          const extra = seasonNumber && episodeNumber ? `${seasonNumber}.${episodeNumber}` : episodeNumber ? episodeNumber : '';
+>>>>>>> Stashed changes
           
           const param = {
             title: entry.title,
@@ -716,7 +724,11 @@ ControllerPodcast.prototype.getPodcastContent = function(uri) {
           var podcastItem = {
             service: self.serviceName,
             type: 'song',
+<<<<<<< Updated upstream
             title: sortBySeasonEpisode && seasonEpisodeValue ? `${seasonEpisodeValue} - ${entry.title}` : entry.title,
+=======
+            title: (extra ? `${extra} - ` : '') + entry.title,
+>>>>>>> Stashed changes
             uri: `podcast/${podcastId}/${encodeURIComponent(urlParam)}`
           };
           if (pubDate)
