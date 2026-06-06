@@ -106,6 +106,8 @@ pirateaudio.prototype.getUIConfig = function() {
 			uiconf.sections[0].content[1].value.value = self.config.get('gpio_ybutton'); //works on fieldtype select
 			uiconf.sections[0].content[1].value.label = self.config.get('gpio_ybutton'); //works on fieldtype select
 			uiconf.sections[0].content[2].value = self.config.get('sleeptimer'); //works on fieldtype input, needs no label
+			uiconf.sections[0].content[3].value.value = '';
+			uiconf.sections[0].content[3].value.label = self.config.get('rotation');
 			//uiconf.sections[0].content[1].value = self.config.get('listmax'); //geht bei Feld input
 			//uiconf.sections[0].content[0].value = 6; //geht als statische Anzeige und bei Feld input
             defer.resolve(uiconf);
@@ -131,6 +133,7 @@ pirateaudio.prototype.setUIConfig = function(data) {
 	self.config.set('listmax', parseInt(data['listmax'].value));//works on fieldtype select
 	self.config.set('gpio_ybutton', parseInt(data['gpio_ybutton'].value));//works on fieldtype select
 	self.config.set('sleeptimer', parseInt(data['sleeptimer']));//works on fieldtype input
+	self.config.set('rotation', parseInt(data['rotation'].value));
 	exec("/usr/bin/sudo /bin/systemctl restart pirateaudio.service", {
 		uid: 1000,
 		gid: 1000

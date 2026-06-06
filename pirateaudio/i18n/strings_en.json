@@ -5,6 +5,7 @@
     "LISTMAX": "How many entries should be maximum displayed on a list view?",
     "GPIOYBUTTON": "Which GPIO pin is used by your pirate audio hat and revision for the Y button?",
     "SLEEPTIMER": "After how many minutes should sleeptimer shut down volumio? ",
+    "ROTATION": "Display rotation (degrees)",
     "SAVE":"Save"
   },
   "DISPLAY": {

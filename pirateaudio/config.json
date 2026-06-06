@@ -14,5 +14,9 @@
     "sleeptimer": {
         "type": "number",
         "value": 15
+    },
+    "rotation": {
+        "type": "number",
+        "value": 90
     }
 }
