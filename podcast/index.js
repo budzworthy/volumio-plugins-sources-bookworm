@@ -625,8 +625,11 @@ ControllerPodcast.prototype.getPodcastContent = function(uri) {
   var uris = uri.split('/');
 
   const podcastId = uris[1];
+  const sortMode = (uris[2] === 'sort' && uris[3]) ? uris[3] : 'date';
+  const sortBySeasonEpisode = sortMode === 'season_episode';
   const targetPodcast = self.podcasts.items.find(item => item.id === podcastId);
-  var podcastResponse = self.cache.get(targetPodcast.id);
+  var cacheKey = `${podcastId}:${sortMode}`;
+  var podcastResponse = self.cache.get(cacheKey);
   if (podcastResponse === undefined) {
     var response = {
       "navigation": {
@@ -664,7 +667,23 @@ ControllerPodcast.prototype.getPodcastContent = function(uri) {
         feed.rss.channel.item.push(tempItem);
       }
 
-      feed.rss.channel.item.some(function (entry, index) {
+      response.navigation.lists[0].items.push({
+        service: self.serviceName,
+        type: 'folder',
+        title: `${sortBySeasonEpisode ? '○' : '●'} ${self.getPodcastI18nString('SORT_BY_DATE')}`,
+        icon: 'fa fa-calendar',
+        uri: `podcast/${podcastId}/sort/date`
+      });
+      response.navigation.lists[0].items.push({
+        service: self.serviceName,
+        type: 'folder',
+        title: `${sortBySeasonEpisode ? '●' : '○'} ${self.getPodcastI18nString('SORT_BY_SEASON_EPISODE')}`,
+        icon: 'fa fa-list-ol',
+        uri: `podcast/${podcastId}/sort/season_episode`
+      });
+
+      var podcastItems = [];
+      feed.rss.channel.item.forEach(function (entry, index) {
         if (entry.enclosure && entry.enclosure.url) {
           var imageUrl;
           if ((entry.image !== undefined) && (entry.image.url !== undefined))
@@ -674,7 +693,20 @@ ControllerPodcast.prototype.getPodcastContent = function(uri) {
           else if (entry.image !== undefined)
             imageUrl = entry.image
 
-          const pubDate = entry.pubDate ? formatter.format(new Date(entry.pubDate)) : null;
+          const pubDateValue = entry.pubDate ? new Date(entry.pubDate) : null;
+          const pubDateTimestamp = pubDateValue && !isNaN(pubDateValue.getTime()) ? pubDateValue.getTime() : 0;
+          const pubDate = pubDateValue && pubDateTimestamp ? formatter.format(pubDateValue) : null;
+
+          const episodeNumberParsed = parseInt(entry['itunes:episode'], 10);
+          const seasonNumberParsed = parseInt(entry['itunes:season'], 10);
+          const episodeNumber = Number.isNaN(episodeNumberParsed) ? -1 : episodeNumberParsed;
+          const seasonNumber = Number.isNaN(seasonNumberParsed) ? -1 : seasonNumberParsed;
+          const seasonEpisodeValue = seasonNumber > -1 && episodeNumber > -1
+            ? `${seasonNumber}.${episodeNumber}`
+            : episodeNumber > -1
+              ? `${episodeNumber}`
+              : '';
+          
           const param = {
             title: entry.title,
             url: entry.enclosure.url,
@@ -684,20 +716,56 @@ ControllerPodcast.prototype.getPodcastContent = function(uri) {
           var podcastItem = {
             service: self.serviceName,
             type: 'song',
-            title: (pubDate ? `${pubDate} - ` : '') + entry.title,
+            title: sortBySeasonEpisode && seasonEpisodeValue ? `${seasonEpisodeValue} - ${entry.title}` : entry.title,
             uri: `podcast/${podcastId}/${encodeURIComponent(urlParam)}`
           };
+          if (pubDate)
+            podcastItem.artist = pubDate;
+
+          if (seasonEpisodeValue)
+            podcastItem.album = `${self.getPodcastI18nString('SEASON_EPISODE_LABEL')}: ${seasonEpisodeValue}`;
           if (imageUrl)
             podcastItem.albumart = imageUrl
           else
             podcastItem.icon = 'fa fa-podcast'
 
-          response.navigation.lists[0].items.push(podcastItem);
+          podcastItems.push({
+            item: podcastItem,
+            index: index,
+            timestamp: pubDateTimestamp,
+            seasonNumber: seasonNumber,
+            episodeNumber: episodeNumber
+          });
         }
-        return (index > self.podcasts.maxEpisode);  // limits podcast episodes
       });
 
-      self.cache.set(targetPodcast.id, response);
+      podcastItems.sort(function(a, b) {
+        if (sortBySeasonEpisode) {
+          if (b.seasonNumber !== a.seasonNumber)
+            return b.seasonNumber - a.seasonNumber;
+          if (b.episodeNumber !== a.episodeNumber)
+            return b.episodeNumber - a.episodeNumber;
+          if (b.timestamp !== a.timestamp)
+            return b.timestamp - a.timestamp;
+          return a.index - b.index;
+        }
+
+        if (b.timestamp !== a.timestamp)
+          return b.timestamp - a.timestamp;
+        if (b.seasonNumber !== a.seasonNumber)
+          return b.seasonNumber - a.seasonNumber;
+        if (b.episodeNumber !== a.episodeNumber)
+          return b.episodeNumber - a.episodeNumber;
+        return a.index - b.index;
+      });
+
+      const maxEpisode = parseInt(self.podcasts.maxEpisode, 10);
+      const limitedItems = Number.isNaN(maxEpisode) ? podcastItems : podcastItems.slice(0, maxEpisode);
+      limitedItems.forEach(function (entry) {
+        response.navigation.lists[0].items.push(entry.item);
+      });
+
+      self.cache.set(cacheKey, response);
       defer.resolve(response);
     })
     .catch((error) => {
