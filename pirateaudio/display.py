@@ -14,7 +14,7 @@ import st7789  # v0.0.6
 import socketio
 import requests
 from numpy import mean
-import RPi.GPIO as GPIO
+from gpiozero import Button
 # import logging
 # logging.getLogger('socketIO-client').setLevel(logging.DEBUG)
 # logging.basicConfig()
@@ -64,9 +64,9 @@ OBJ_TRANS = json.loads(DATA_TRANS)
 TITLE_QUEUE, LEN_QUEUE = [], 0  # v.0.0.4
 NAV_ARRAY_NAME, NAV_ARRAY_URI, NAV_ARRAY_TYPE, NAV_ARRAY_SERVICE = [], [], [], []
 FONT_DICT = {
-    "FONT_S": ImageFont.truetype(''.join([SCRIPT_PATH, '/fonts/Roboto-Medium.ttf']), 20),
-    "FONT_M": ImageFont.truetype(''.join([SCRIPT_PATH, '/fonts/Roboto-Medium.ttf']), 24),
-    "FONT_L": ImageFont.truetype(''.join([SCRIPT_PATH, '/fonts/Roboto-Medium.ttf']), 30),
+    "FONT_S": ImageFont.truetype(''.join([SCRIPT_PATH, '/fonts/Roboto-Medium.ttf']), 18),
+    "FONT_M": ImageFont.truetype(''.join([SCRIPT_PATH, '/fonts/Roboto-Medium.ttf']), 22),
+    "FONT_L": ImageFont.truetype(''.join([SCRIPT_PATH, '/fonts/Roboto-Medium.ttf']), 28),
     "FONT_FAS": ImageFont.truetype(''.join([SCRIPT_PATH, '/fonts/FontAwesome5-Free-Solid.otf']), 28)
 }
 IMAGE_DICT = {
@@ -106,12 +106,113 @@ OVERLAY_DICT = {
 }
 
 BUTTONS = [5, 6, 16, OBJ['gpio_ybutton']['value']]
-# LABELS = ['A', 'B', 'X', 'Y']
-GPIO.setmode(GPIO.BCM)  # Set up RPi.GPIO with BCM numbering scheme
+GPIO_BUTTONS = {}
+BUTTON_HOLD_TIME = 0.25
+BUTTON_BOUNCE_TIME = 0.05
+BACKGROUND_BLUR_RADIUS = 1.5
+GRADIENT_ALPHA_MIN = 45
+GRADIENT_ALPHA_MAX = 140
+BACKGROUND_GRADIENT = None
 
 # debug
 # import PIL
 # print('PIL',PIL.__version__)
+
+
+def get_text_size(draw, text, font):
+    """helper for width and height of text"""
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+
+def fit_text_lines(draw, text, font, max_width, max_lines=None):
+    """word-wrap helper with long-word fallback"""
+    value = '' if text is None else str(text).strip()
+    if not value:
+        return ['']
+
+    words = value.split()
+    lines = []
+    current = ''
+    truncated = False
+
+    def split_long_word(word):
+        chunks = []
+        chunk = ''
+        for char in word:
+            candidate = chunk + char
+            width, _ = get_text_size(draw, candidate, font)
+            if width <= max_width or not chunk:
+                chunk = candidate
+            else:
+                chunks.append(chunk)
+                chunk = char
+        if chunk:
+            chunks.append(chunk)
+        return chunks
+
+    for word in words:
+        word_width, _ = get_text_size(draw, word, font)
+        if word_width > max_width:
+            if current:
+                lines.append(current)
+                current = ''
+            for chunk in split_long_word(word):
+                lines.append(chunk)
+                if max_lines and len(lines) >= max_lines:
+                    truncated = True
+                    break
+            if truncated:
+                break
+            continue
+
+        candidate = word if not current else ''.join([current, ' ', word])
+        width, _ = get_text_size(draw, candidate, font)
+        if width <= max_width:
+            current = candidate
+        else:
+            lines.append(current)
+            if max_lines and len(lines) >= max_lines:
+                truncated = True
+                break
+            current = word
+
+    if current and (not max_lines or len(lines) < max_lines):
+        lines.append(current)
+    elif current:
+        truncated = True
+
+    if max_lines and len(lines) > max_lines:
+        lines = lines[:max_lines]
+        truncated = True
+
+    if truncated and lines:
+        while lines:
+            candidate = ''.join([lines[-1], '…'])
+            width, _ = get_text_size(draw, candidate, font)
+            if width <= max_width:
+                lines[-1] = candidate
+                break
+            lines[-1] = lines[-1][:-1]
+            if not lines[-1]:
+                lines[-1] = '…'
+                break
+
+    return lines
+
+
+def apply_background_style(image):
+    """adds subtle gradient overlay for better readability"""
+    global BACKGROUND_GRADIENT
+    styled = image.copy().convert('RGBA')
+    if BACKGROUND_GRADIENT is None or BACKGROUND_GRADIENT.size != styled.size:
+        BACKGROUND_GRADIENT = Image.new('RGBA', styled.size, (0, 0, 0, 0))
+        draw_gradient = ImageDraw.Draw(BACKGROUND_GRADIENT, 'RGBA')
+        for y in range(styled.height):
+            alpha = int(GRADIENT_ALPHA_MIN + ((GRADIENT_ALPHA_MAX - GRADIENT_ALPHA_MIN) * y / max(styled.height - 1, 1)))
+            draw_gradient.line([(0, y), (styled.width, y)], fill=(12, 17, 28, alpha))
+    styled.alpha_composite(BACKGROUND_GRADIENT)
+    return styled
 
 
 def clean(*args):
@@ -119,7 +220,9 @@ def clean(*args):
     display_stuff(IMAGE_DICT['BG_DEFAULT'], OBJ_TRANS['DISPLAY']['SHUTDOWN'], 0, 0, 'info')  # v0.0.7
     sleep(1)  # v0.0.7
     DISP.set_backlight(False)
-    GPIO.cleanup(BUTTONS)  # v0.0.4
+    for pin in BUTTONS:
+        if pin in GPIO_BUTTONS:
+            GPIO_BUTTONS[pin].close()
     sys.exit(0)
 
 
@@ -244,36 +347,44 @@ def display_stuff(picture, text, marked, start, icons='nav'):  # v.0.0.4 test fo
 
             # Loop for creating text to display
             for i in range(start, listbis):  # v.0.0.4
-                XY = f_xy(text[0+i], FONT_DICT['FONT_M'])
-                hei1 = XY[1]
-                X2 = XY[2]
-                if X2 < 0:  # v.0.0.4 dont center text if to long
+                lines = fit_text_lines(draw3, text[0+i], FONT_DICT['FONT_M'], IMAGE_DICT['WIDTH'] - 12, max_lines=2)
+                line_sizes = [get_text_size(draw3, line, FONT_DICT['FONT_M']) for line in lines]
+                hei1 = sum(item[1] for item in line_sizes)
+                max_width = max((item[0] for item in line_sizes), default=0)
+                X2 = (IMAGE_DICT['WIDTH'] - max_width) // 2
+                if X2 < 0:
                     X2 = 0
                 if i == marked:
-                    draw3.rectangle((X2, Y + 2, X2 + XY[0], Y + hei1), (255, 255, 255))
-                    f_drawtext(X2, Y, text[0+i], FONT_DICT['FONT_M'], (0, 0, 0))
+                    draw3.rectangle((X2, Y + 2, X2 + max_width, Y + hei1 + 2), (255, 255, 255))
+                    line_y = Y
+                    for line in lines:
+                        f_drawtext(X2, line_y, line, FONT_DICT['FONT_M'], (0, 0, 0))
+                        line_y += get_text_size(draw3, line, FONT_DICT['FONT_M'])[1]
                 else:
-                    f_drawtext(X2 + 3, Y + 3, text[0+i], FONT_DICT['FONT_M'], (15, 15, 15))
-                    f_drawtext(X2, Y, text[0+i], FONT_DICT['FONT_M'])
-                Y += hei1  # add line to startheigt for next entry
+                    line_y = Y
+                    for line in lines:
+                        f_drawtext(X2 + 2, line_y + 2, line, FONT_DICT['FONT_M'], (15, 15, 15))
+                        f_drawtext(X2, line_y, line, FONT_DICT['FONT_M'])
+                        line_y += get_text_size(draw3, line, FONT_DICT['FONT_M'])[1]
+                Y += hei1 + 2  # add line to startheigt for next entry
         else:
             result = 1  # needed for right pageindex
-            XY = f_xy(text, FONT_DICT['FONT_M'])
-            len1 = XY[0]
-            hei1 = XY[1]
-            X2 = XY[2]
-            y2 = XY[3]
-            draw3.rectangle((X2, y2, X2 + len1, y2 + hei1), (255, 255, 255))
-            f_drawtext(X2, y2, text, FONT_DICT['FONT_M'], (0, 0, 0))
+            lines = fit_text_lines(draw3, text, FONT_DICT['FONT_M'], IMAGE_DICT['WIDTH'] - 20, max_lines=3)
+            line_sizes = [get_text_size(draw3, line, FONT_DICT['FONT_M']) for line in lines]
+            len1 = max((item[0] for item in line_sizes), default=0)
+            hei1 = sum(item[1] for item in line_sizes)
+            X2 = (IMAGE_DICT['WIDTH'] - len1)//2
+            y2 = (IMAGE_DICT['HEIGHT'] - hei1)//2
+            draw3.rectangle((X2, y2, X2 + len1, y2 + hei1 + 2), (255, 255, 255))
+            for line in lines:
+                f_drawtext(X2, y2, line, FONT_DICT['FONT_M'], (0, 0, 0))
+                y2 += get_text_size(draw3, line, FONT_DICT['FONT_M'])[1]
         # print("def_ftextcontent--- %s seconds ---" % (time() - start_time2))  # debug, time of code execution
         return result
 
     def f_xy(text, font):
         """helper for width and height of text"""
-        # len1, hei1 = draw3.textsize(text, font)
-        bbox = draw3.textbbox((0, 0), text, font=font)
-        len1 = bbox[2] - bbox[0]
-        hei1 = bbox[3] - bbox[1]
+        len1, hei1 = get_text_size(draw3, text, font)
 
         x = (IMAGE_DICT['WIDTH'] - len1)//2
         Y = (IMAGE_DICT['HEIGHT'] - hei1)//2
@@ -289,7 +400,7 @@ def display_stuff(picture, text, marked, start, icons='nav'):  # v.0.0.4 test fo
             f_drawtext(XY[2], IMAGE_DICT['HEIGHT'] - XY[1], pagestring, FONT_DICT['FONT_M'])
 
     if picture == IMAGE_DICT['BG_DEFAULT']:
-        IMAGE_DICT['IMG3'] = IMAGE_DICT['BG_DEFAULT'].copy()
+        IMAGE_DICT['IMG3'] = apply_background_style(IMAGE_DICT['BG_DEFAULT'])
     else:
         IMAGE_DICT['IMG3'] = Image.open(picture).convert('RGBA')  # v.0.0.4
     draw3 = ImageDraw.Draw(IMAGE_DICT['IMG3'], 'RGBA')
@@ -385,12 +496,8 @@ def on_push_state(*args):
 
 
     def f_textsize(text, fontsize):
-        """"helper textsize"""
-        #w1, y1 = draw.textsize(text, fontsize)
-        bbox = draw.textbbox((0, 0), text, font=fontsize)
-        w1 = bbox[2] - bbox[0]
-        h1 = bbox[3] - bbox[1]
-
+        """helper textsize"""
+        w1, _ = get_text_size(draw, text, fontsize)
         return w1
 
     def f_drawtext(x, y, text, fontstring, fillstring):
@@ -405,14 +512,20 @@ def on_push_state(*args):
             x1 = 0
         return x1
 
-    def f_content(field, fontsize, top, shadowoffset=1):
+    def f_content(field, fontsize, top, shadowoffset=1, max_lines=1, max_width=None):
         """draw content"""
         if field in args[0]:
             if args[0][field] is not None:
-                w1 = f_textsize(args[0][field], fontsize)
-                x1 = f_x1(w1)
-                f_drawtext(x1 + shadowoffset, top + shadowoffset, args[0][field], fontsize, OVERLAY_DICT['STR_COL'])  # shadow
-                f_drawtext(x1, top, args[0][field], fontsize, OVERLAY_DICT['TXT_COL'])
+                local_max_width = max_width if max_width else IMAGE_DICT['WIDTH'] - 12
+                lines = fit_text_lines(draw, args[0][field], fontsize, local_max_width, max_lines=max_lines)
+                line_y = top
+                for line in lines:
+                    w1 = f_textsize(line, fontsize)
+                    x1 = f_x1(w1)
+                    f_drawtext(x1 + shadowoffset, line_y + shadowoffset, line, fontsize, OVERLAY_DICT['STR_COL'])  # shadow
+                    f_drawtext(x1, line_y, line, fontsize, OVERLAY_DICT['TXT_COL'])
+                    _, line_h = get_text_size(draw, line, fontsize)
+                    line_y += line_h
 
     def f_background(albumurl):
         """helper background"""
@@ -430,10 +543,11 @@ def on_push_state(*args):
             try:  # to catch not displayable images
                 IMAGE_DICT['IMG'] = Image.open(BytesIO(response.content)).convert('RGBA')  # v.0.04 gab bei spotify probleme
                 IMAGE_DICT['IMG'] = IMAGE_DICT['IMG'].resize((IMAGE_DICT['WIDTH'], IMAGE_DICT['HEIGHT']))
-                IMAGE_DICT['IMG'] = IMAGE_DICT['IMG'].filter(ImageFilter.BLUR)  # Blur
+                IMAGE_DICT['IMG'] = IMAGE_DICT['IMG'].filter(ImageFilter.GaussianBlur(radius=BACKGROUND_BLUR_RADIUS))
             except (ValueError, RuntimeError) as e:
                 IMAGE_DICT['IMG'] = IMAGE_DICT['BG_DEFAULT'].copy()
 
+            IMAGE_DICT['IMG'] = apply_background_style(IMAGE_DICT['IMG'])
             IMAGE_DICT['IMG2'] = IMAGE_DICT['IMG'].copy()
             f_textcontrast(IMAGE_DICT['IMG'])  # to get the right values in TXT_COL, STR_COL, BAR_BGCOL, BAR_COL, DARK
         return IMAGE_DICT['IMG']
@@ -468,9 +582,9 @@ def on_push_state(*args):
         f_drawtext(210, 174, u"\uf028", FONT_DICT['FONT_FAS'], OVERLAY_DICT['TXT_COL'])
 
         # text
-        f_content('artist', FONT_DICT['FONT_M'], 7, 2)
-        f_content('album', FONT_DICT['FONT_M'], 35, 2)
-        f_content('title', FONT_DICT['FONT_L'], 105, 2)
+        f_content('artist', FONT_DICT['FONT_S'], 8, 2, max_lines=1, max_width=IMAGE_DICT['WIDTH'] - 16)
+        f_content('album', FONT_DICT['FONT_S'], 32, 2, max_lines=1, max_width=IMAGE_DICT['WIDTH'] - 16)
+        f_content('title', FONT_DICT['FONT_L'], 96, 2, max_lines=2, max_width=IMAGE_DICT['WIDTH'] - 20)
 
         # volumebar
         draw.rectangle((5, 184, IMAGE_DICT['WIDTH']-34, 184 + 8), OVERLAY_DICT['BAR_BGCOL'])  # background
@@ -632,9 +746,8 @@ def button_a(mode, status):  # optimieren, VOLUMIO_DICT['MODE'] durch mode (loka
 def button_b(mode, status):  # optimieren, VOLUMIO_DICT['MODE'] durch mode (lokale variable) ersetzen
     #print('button_b, mode:', mode, 'pin:', pin)
     if mode == 'player':
-        while not GPIO.input(6) and VOLUMIO_DICT['VOLUME'] > 0:  # limit/exit at volume 0 so amixer dont go crazy
+        if VOLUMIO_DICT['VOLUME'] > 0:  # limit/exit at volume 0 so amixer dont go crazy
             SOCKETIO.emit('volume', '-')
-            sleep(0.5)
     elif mode in ['navigation', 'menu', 'seek', 'prevnext']:
         reset_variable('player')
         IMAGE_DICT['LASTREFRESH'] = time()-5  # to get display refresh independ from refresh thread
@@ -647,15 +760,13 @@ def button_x(mode, status):  # optimieren, VOLUMIO_DICT['MODE'] durch mode (loka
         navigation_handler()
         DISP.set_backlight(True)  # v.0.0.4
     elif mode in ['navigation', 'menu']:  # v.0.0.7 hint pylint
-        while not GPIO.input(16):
-            NAV_DICT['MARKER'] -= 1  # count minus 1
-            if NAV_DICT['MARKER'] < 0:  # blaettere nach oben durch
-                NAV_DICT['MARKER'] = NAV_DICT['LISTRESULT'] - 1
-                if NAV_DICT['LISTRESULT'] > NAV_DICT['LISTMAX'] - 1:  # dann aendere auch noch den liststart
-                    NAV_DICT['LISTSTART'] = int(NAV_DICT['LISTSTART'] + (floor(NAV_DICT['LISTRESULT']/NAV_DICT['LISTMAX'])*NAV_DICT['LISTMAX']))
-            NAV_DICT['LISTSTART'] = int(floor(NAV_DICT['MARKER']/NAV_DICT['LISTMAX'])*NAV_DICT['LISTMAX'])  # definiert das blaettern zur naechsten Seite
-            display_stuff(IMAGE_DICT['BG_DEFAULT'], NAV_ARRAY_NAME, NAV_DICT['MARKER'], NAV_DICT['LISTSTART'])
-            sleep(0.1)  # v.0.0.7
+        NAV_DICT['MARKER'] -= 1  # count minus 1
+        if NAV_DICT['MARKER'] < 0:  # blaettere nach oben durch
+            NAV_DICT['MARKER'] = NAV_DICT['LISTRESULT'] - 1
+            if NAV_DICT['LISTRESULT'] > NAV_DICT['LISTMAX'] - 1:  # dann aendere auch noch den liststart
+                NAV_DICT['LISTSTART'] = int(NAV_DICT['LISTSTART'] + (floor(NAV_DICT['LISTRESULT']/NAV_DICT['LISTMAX'])*NAV_DICT['LISTMAX']))
+        NAV_DICT['LISTSTART'] = int(floor(NAV_DICT['MARKER']/NAV_DICT['LISTMAX'])*NAV_DICT['LISTMAX'])  # definiert das blaettern zur naechsten Seite
+        display_stuff(IMAGE_DICT['BG_DEFAULT'], NAV_ARRAY_NAME, NAV_DICT['MARKER'], NAV_DICT['LISTSTART'])
     elif mode == 'seek':  # v.0.0.4
         seeking('+')
     elif mode == 'prevnext':  # v.0.0.4
@@ -669,44 +780,38 @@ def button_y(mode, status):  # optimieren, VOLUMIO_DICT['MODE'] durch mode (loka
     elif mode == 'prevnext':
         prevnext('prev')
     else:
-        while not GPIO.input(BUTTONS[3]):
-            if mode == 'player' and VOLUMIO_DICT['VOLUME'] < 100:  # limit/exit at volume 100 so amixer dont go crazy
-                SOCKETIO.emit('volume', '+')
-                sleep(0.5)
-            elif mode in ['navigation', 'menu']:  # v.0.0.7 hint pylint
-                NAV_DICT['MARKER'] += 1  # count plus 1
-                NAV_DICT['LISTSTART'] = int(floor(NAV_DICT['MARKER']/NAV_DICT['LISTMAX'])*NAV_DICT['LISTMAX'])  # definiert das blaettern zur naechsten Seite
-                if NAV_DICT['MARKER'] > NAV_DICT['LISTRESULT'] - 1:  # blaettere nach unten durch
-                    NAV_DICT['MARKER'] = 0
-                    NAV_DICT['LISTSTART'] = 0
-                display_stuff(IMAGE_DICT['BG_DEFAULT'], NAV_ARRAY_NAME, NAV_DICT['MARKER'], NAV_DICT['LISTSTART'])
-                sleep(0.1)  # v.0.0.7
+        if mode == 'player' and VOLUMIO_DICT['VOLUME'] < 100:  # limit/exit at volume 100 so amixer dont go crazy
+            SOCKETIO.emit('volume', '+')
+        elif mode in ['navigation', 'menu']:  # v.0.0.7 hint pylint
+            NAV_DICT['MARKER'] += 1  # count plus 1
+            NAV_DICT['LISTSTART'] = int(floor(NAV_DICT['MARKER']/NAV_DICT['LISTMAX'])*NAV_DICT['LISTMAX'])  # definiert das blaettern zur naechsten Seite
+            if NAV_DICT['MARKER'] > NAV_DICT['LISTRESULT'] - 1:  # blaettere nach unten durch
+                NAV_DICT['MARKER'] = 0
+                NAV_DICT['LISTSTART'] = 0
+            display_stuff(IMAGE_DICT['BG_DEFAULT'], NAV_ARRAY_NAME, NAV_DICT['MARKER'], NAV_DICT['LISTSTART'])
 
 
-# Initialize each button pin as input with pull-up
+def button_hold(pin):
+    """handle long press actions"""
+    mode = VOLUMIO_DICT['MODE']
+    if pin == 6 and mode == 'player':
+        button_b(mode, VOLUMIO_DICT['STATUS'])
+    elif pin == 16 and mode in ['navigation', 'menu']:
+        button_x(mode, VOLUMIO_DICT['STATUS'])
+    elif pin == BUTTONS[3] and mode in ['player', 'navigation', 'menu']:
+        button_y(mode, VOLUMIO_DICT['STATUS'])
+
+
 for pin in BUTTONS:
     try:
         print(f'register {pin}')
-        GPIO.setup(pin, GPIO.IN, GPIO.PUD_UP)
+        GPIO_BUTTONS[pin] = Button(pin, pull_up=True, hold_time=BUTTON_HOLD_TIME, hold_repeat=True, bounce_time=BUTTON_BOUNCE_TIME)
+        GPIO_BUTTONS[pin].when_pressed = lambda pin=pin: handle_button(pin)
+        GPIO_BUTTONS[pin].when_held = lambda pin=pin: button_hold(pin)
         print('success')
         sleep(0.1)
     except (ValueError, RuntimeError) as e:
         print('ERROR at setup channel:', e)
-
-# Now we track previous states and poll for falling edges
-prev_pin_state = {pin: GPIO.input(pin) for pin in BUTTONS}
-POLL_INTERVAL = 0.05  # 50ms
-
-def button_poll_thread():
-    """Check button states in a loop for falling edges."""
-    while True:
-        for pin in BUTTONS:
-            cur_state = GPIO.input(pin)
-            # If we see 1->0 transition, it's a press
-            if prev_pin_state[pin] == 1 and cur_state == 0:
-                handle_button(pin)
-            prev_pin_state[pin] = cur_state
-        sleep(POLL_INTERVAL)
 
 
 def main():
@@ -732,13 +837,8 @@ def display_helper():  # v0.0.7
 THREAD1 = Thread(target=display_helper)  # v0.0.7
 THREAD1.daemon = True  # v0.0.7
 
-# Second thread for button polling
-THREAD2 = Thread(target=button_poll_thread)
-THREAD2.daemon = True
-
 try:
     THREAD1.start()  # v0.0.7
-    THREAD2.start()
     main()
 except KeyboardInterrupt:
     clean()
