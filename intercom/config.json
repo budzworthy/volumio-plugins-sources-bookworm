@@ -1,0 +1,18 @@
+{
+  "server_port": {
+    "type": "number",
+    "value": 8096
+  },
+  "intercom_gain": {
+    "type": "number",
+    "value": 1.0
+  },
+  "auto_resume": {
+    "type": "boolean",
+    "value": true
+  },
+  "sample_rate": {
+    "type": "number",
+    "value": 16000
+  }
+}

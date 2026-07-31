@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Volumio Intercom</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f0f1a;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+      gap: 0;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: #fff;
+    }
+    .header p {
+      font-size: 0.85rem;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    /* Status badge */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 18px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 40px;
+      transition: background 0.3s, color 0.3s;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .status-badge.idle  { background: #1e1e30; color: #666; }
+    .status-badge.idle .status-dot { background: #444; }
+
+    .status-badge.connecting { background: #2a2010; color: #f0a030; }
+    .status-badge.connecting .status-dot { background: #f0a030; }
+
+    .status-badge.live  { background: #2a0a0a; color: #ff4444; }
+    .status-badge.live .status-dot {
+      background: #ff4444;
+      animation: blink 1.2s ease-in-out infinite;
+    }
+
+    .status-badge.stopping { background: #1e1e30; color: #888; }
+    .status-badge.stopping .status-dot { background: #888; }
+
+    .status-badge.error { background: #2a0505; color: #ff6060; }
+    .status-badge.error .status-dot { background: #ff6060; }
+
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+    /* Broadcast button */
+    .btn-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 36px;
+    }
+
+    .broadcast-btn {
+      width: 130px;
+      height: 130px;
+      border-radius: 50%;
+      border: 3px solid #cc2222;
+      background: transparent;
+      color: #cc2222;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      transition: background 0.2s, color 0.2s, border-color 0.2s, transform 0.1s;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    .broadcast-btn:active { transform: scale(0.94); }
+    .broadcast-btn.live {
+      background: #cc2222;
+      color: #fff;
+      border-color: #cc2222;
+    }
+    .broadcast-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .broadcast-btn svg {
+      width: 38px;
+      height: 38px;
+      flex-shrink: 0;
+    }
+
+    /* Ripple ring when live */
+    .btn-ring {
+      position: absolute;
+      width: 150px;
+      height: 150px;
+      border-radius: 50%;
+      border: 2px solid #cc2222;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .broadcast-btn.live + .btn-ring {
+      animation: ring-pulse 2s ease-out infinite;
+    }
+    @keyframes ring-pulse {
+      0%   { transform: scale(1);    opacity: 0.6; }
+      100% { transform: scale(1.45); opacity: 0; }
+    }
+
+    /* Error / info message */
+    .message-box {
+      max-width: 320px;
+      width: 100%;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      text-align: center;
+      display: none;
+    }
+    .message-box.visible { display: block; }
+    .message-box.error-box { background: #1e0a0a; color: #ff7070; border: 1px solid #3a1010; }
+    .message-box.info-box  { background: #0a1e1e; color: #70c0ff; border: 1px solid #103030; }
+
+    /* Footer hint */
+    .hint {
+      margin-top: 32px;
+      font-size: 0.75rem;
+      color: #444;
+      text-align: center;
+      line-height: 1.6;
+    }
+    .hint a { color: #555; text-decoration: none; }
+
+    /* Volume indicator (shown when live) */
+    .vu-wrap {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .vu-wrap.visible { display: flex; }
+    .vu-label { font-size: 0.7rem; color: #555; letter-spacing: 0.05em; text-transform: uppercase; }
+    .vu-bar-track {
+      width: 200px;
+      height: 6px;
+      background: #1e1e30;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .vu-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #2ecc71, #e67e22, #e74c3c);
+      border-radius: 3px;
+      transition: width 0.05s linear;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>📢 Volumio Intercom</h1>
+    <p>Stream your microphone to the speaker</p>
+  </div>
+
+  <div id="statusBadge" class="status-badge idle">
+    <span class="status-dot"></span>
+    <span id="statusText">Idle</span>
+  </div>
+
+  <div class="btn-wrap">
+    <button id="broadcastBtn" class="broadcast-btn" onclick="toggleBroadcast()">
+      <!-- Microphone icon -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="2" width="6" height="11" rx="3"/>
+        <path d="M5 10v2a7 7 0 0 0 14 0v-2"/>
+        <line x1="12" y1="19" x2="12" y2="23"/>
+        <line x1="8"  y1="23" x2="16" y2="23"/>
+      </svg>
+      <span id="btnLabel">Start</span>
+    </button>
+    <div class="btn-ring"></div>
+  </div>
+
+  <div class="vu-wrap" id="vuWrap">
+    <span class="vu-label">Microphone Level</span>
+    <div class="vu-bar-track"><div class="vu-bar" id="vuBar"></div></div>
+  </div>
+
+  <div id="errorBox"   class="message-box error-box"></div>
+  <div id="infoBox"    class="message-box info-box"></div>
+
+  <div class="hint">
+    Open this page from your phone while on the same Wi-Fi network.<br>
+    Tap <strong>Start</strong> and allow microphone access when prompted.
+  </div>
+
+<script>
+/* -----------------------------------------------------------------------
+ * Config injected server-side
+ * --------------------------------------------------------------------- */
+var SAMPLE_RATE = {{SAMPLE_RATE}};
+var BUFFER_SIZE = 4096;  // samples per ScriptProcessor frame
+
+/* -----------------------------------------------------------------------
+ * State
+ * --------------------------------------------------------------------- */
+var ws            = null;
+var audioCtx      = null;
+var mediaStream   = null;
+var sourceNode    = null;
+var processorNode = null;
+var analyserNode  = null;
+var vuRaf         = null;
+var isLive        = false;
+
+var serverHost = window.location.hostname;
+var serverPort = window.location.port || '8096';
+
+/* -----------------------------------------------------------------------
+ * DOM helpers
+ * --------------------------------------------------------------------- */
+function setStatus(cls, text) {
+  var badge = document.getElementById('statusBadge');
+  badge.className = 'status-badge ' + cls;
+  document.getElementById('statusText').textContent = text;
+}
+
+function showError(msg) {
+  var el = document.getElementById('errorBox');
+  el.textContent = msg;
+  el.className = 'message-box error-box visible';
+  document.getElementById('infoBox').className = 'message-box info-box';
+}
+
+function showInfo(msg) {
+  var el = document.getElementById('infoBox');
+  el.textContent = msg;
+  el.className = 'message-box info-box visible';
+  document.getElementById('errorBox').className = 'message-box error-box';
+}
+
+function clearMessages() {
+  document.getElementById('errorBox').className = 'message-box error-box';
+  document.getElementById('infoBox').className  = 'message-box info-box';
+}
+
+function setBtnLive(live) {
+  var btn = document.getElementById('broadcastBtn');
+  var lbl = document.getElementById('btnLabel');
+  btn.className = 'broadcast-btn' + (live ? ' live' : '');
+  lbl.textContent = live ? 'Stop' : 'Start';
+}
+
+function setBtnDisabled(disabled) {
+  document.getElementById('broadcastBtn').disabled = disabled;
+}
+
+function setVuVisible(visible) {
+  document.getElementById('vuWrap').className = 'vu-wrap' + (visible ? ' visible' : '');
+}
+
+/* -----------------------------------------------------------------------
+ * VU meter loop
+ * --------------------------------------------------------------------- */
+function startVu() {
+  var bar = document.getElementById('vuBar');
+  var buf = new Uint8Array(analyserNode.frequencyBinCount);
+
+  function tick() {
+    if (!isLive) { bar.style.width = '0%'; return; }
+    analyserNode.getByteTimeDomainData(buf);
+    var peak = 0;
+    for (var i = 0; i < buf.length; i++) {
+      var v = Math.abs(buf[i] - 128) / 128;
+      if (v > peak) peak = v;
+    }
+    bar.style.width = Math.round(peak * 100) + '%';
+    vuRaf = requestAnimationFrame(tick);
+  }
+  vuRaf = requestAnimationFrame(tick);
+}
+
+function stopVu() {
+  if (vuRaf) { cancelAnimationFrame(vuRaf); vuRaf = null; }
+  document.getElementById('vuBar').style.width = '0%';
+  setVuVisible(false);
+}
+
+/* -----------------------------------------------------------------------
+ * Float32 → Int16 conversion
+ * --------------------------------------------------------------------- */
+function float32ToInt16(float32) {
+  var out = new Int16Array(float32.length);
+  for (var i = 0; i < float32.length; i++) {
+    var s = float32[i];
+    if (s >  1) s =  1;
+    if (s < -1) s = -1;
+    out[i] = s < 0 ? s * 32768 : s * 32767;
+  }
+  return out;
+}
+
+/* -----------------------------------------------------------------------
+ * Audio capture pipeline
+ * Uses ScriptProcessorNode for broad browser compatibility.
+ * TODO: [FUTURE-LISTEN] For two-way mode, add an AudioWorklet source node
+ *   here that plays back audio received from a /listen WebSocket stream.
+ * --------------------------------------------------------------------- */
+function startAudioCapture() {
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)(
+      { sampleRate: SAMPLE_RATE }
+    );
+
+    sourceNode    = audioCtx.createMediaStreamSource(mediaStream);
+    analyserNode  = audioCtx.createAnalyser();
+    processorNode = audioCtx.createScriptProcessor(BUFFER_SIZE, 1, 1);
+
+    analyserNode.fftSize = 256;
+    sourceNode.connect(analyserNode);
+    sourceNode.connect(processorNode);
+
+    // Connect through a silent (gain=0) node to keep the Web Audio graph
+    // alive without routing microphone audio back to the phone's own speaker.
+    var silentGain = audioCtx.createGain();
+    silentGain.gain.value = 0;
+    processorNode.connect(silentGain);
+    silentGain.connect(audioCtx.destination);
+
+    processorNode.onaudioprocess = function(e) {
+      if (!isLive || !ws || ws.readyState !== WebSocket.OPEN) return;
+      var pcm = float32ToInt16(e.inputBuffer.getChannelData(0));
+      ws.send(pcm.buffer);
+    };
+
+    setVuVisible(true);
+    startVu();
+  } catch (err) {
+    showError('Audio capture error: ' + err.message);
+    stopBroadcast();
+  }
+}
+
+function stopAudioCapture() {
+  stopVu();
+  if (processorNode) { try { processorNode.disconnect(); } catch(e) {} processorNode = null; }
+  if (analyserNode)  { try { analyserNode.disconnect();  } catch(e) {} analyserNode  = null; }
+  if (sourceNode)    { try { sourceNode.disconnect();    } catch(e) {} sourceNode    = null; }
+  if (audioCtx)      { try { audioCtx.close();           } catch(e) {} audioCtx      = null; }
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(function(t) { t.stop(); });
+    mediaStream = null;
+  }
+}
+
+/* -----------------------------------------------------------------------
+ * WebSocket helpers
+ * --------------------------------------------------------------------- */
+function connectWs(onReady) {
+  var url = 'ws://' + serverHost + ':' + serverPort + '/ws';
+  ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = function() {
+    ws.send(JSON.stringify({ type: 'start' }));
+  };
+
+  ws.onmessage = function(evt) {
+    if (typeof evt.data !== 'string') return;
+    var msg;
+    try { msg = JSON.parse(evt.data); } catch(e) { return; }
+    handleServerMessage(msg);
+  };
+
+  ws.onerror = function() {
+    setStatus('error', 'Error');
+    showError('Cannot reach Volumio at ' + serverHost + ':' + serverPort +
+              '.\nIs the Intercom plugin enabled?');
+    teardownBroadcast(false);
+  };
+
+  ws.onclose = function() {
+    if (isLive) {
+      teardownBroadcast(false);
+      setStatus('idle', 'Idle');
+      setBtnLive(false);
+    }
+    ws = null;
+  };
+}
+
+function closeWs() {
+  if (!ws) return;
+  ws.onclose = null;
+  ws.onerror = null;
+  try { ws.close(); } catch(e) {}
+  ws = null;
+}
+
+/* -----------------------------------------------------------------------
+ * Server message handler
+ * --------------------------------------------------------------------- */
+function handleServerMessage(msg) {
+  if (msg.type !== 'status') return;
+
+  switch (msg.state) {
+    case 'live':
+      isLive = true;
+      setBtnDisabled(false);
+      setBtnLive(true);
+      setStatus('live', '● LIVE');
+      clearMessages();
+      startAudioCapture();
+      break;
+
+    case 'idle':
+      teardownBroadcast(false);
+      setStatus('idle', 'Idle');
+      setBtnLive(false);
+      setBtnDisabled(false);
+      break;
+
+    case 'busy':
+      teardownBroadcast(false);
+      setStatus('idle', 'Idle');
+      setBtnDisabled(false);
+      showInfo(msg.message || 'Another broadcast is already active.');
+      break;
+
+    case 'error':
+      teardownBroadcast(false);
+      setStatus('error', 'Error');
+      setBtnDisabled(false);
+      showError(msg.message || 'An error occurred.');
+      break;
+  }
+}
+
+/* -----------------------------------------------------------------------
+ * Full teardown (audio + ws), without touching button/status labels
+ * --------------------------------------------------------------------- */
+function teardownBroadcast(sendStop) {
+  isLive = false;
+  if (sendStop && ws && ws.readyState === WebSocket.OPEN) {
+    try { ws.send(JSON.stringify({ type: 'stop' })); } catch(e) {}
+  }
+  stopAudioCapture();
+  closeWs();
+}
+
+/* -----------------------------------------------------------------------
+ * Public toggle (called by button onclick)
+ * --------------------------------------------------------------------- */
+function toggleBroadcast() {
+  if (isLive) {
+    stopBroadcast();
+  } else {
+    startBroadcast();
+  }
+}
+
+async function startBroadcast() {
+  clearMessages();
+  setBtnDisabled(true);
+  setStatus('connecting', 'Connecting…');
+
+  // Request microphone access first (requires user gesture)
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        sampleRate: SAMPLE_RATE,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: false
+      },
+      video: false
+    });
+  } catch (err) {
+    setBtnDisabled(false);
+    setStatus('error', 'Error');
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      showError('Microphone permission denied.\nTap Start again and allow microphone access when your browser asks.');
+    } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+      showError('No microphone found on this device.');
+    } else if (err.name === 'NotSupportedError') {
+      showError('Your browser does not support microphone access over HTTP.\nTry a different browser or use HTTPS.');
+    } else {
+      showError('Microphone error: ' + err.message);
+    }
+    return;
+  }
+
+  connectWs();
+  // Button stays disabled until server confirms 'live' or an error occurs
+}
+
+function stopBroadcast() {
+  teardownBroadcast(true);
+  setStatus('stopping', 'Stopping…');
+  setBtnLive(false);
+  setBtnDisabled(false);
+  setStatus('idle', 'Idle');
+}
+
+/* -----------------------------------------------------------------------
+ * On load: check server status
+ * --------------------------------------------------------------------- */
+window.addEventListener('load', function() {
+  // Basic environment checks
+  if (!window.WebSocket) {
+    showError('Your browser does not support WebSockets. Please use a modern browser.');
+    setBtnDisabled(true);
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showError('Microphone access is not available.\nOpen this page over HTTP on the same network as Volumio, using a modern browser.');
+    setBtnDisabled(true);
+    return;
+  }
+
+  // Poll server status
+  fetch('/status')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.state === 'live') {
+        setStatus('live', '● LIVE (busy)');
+        showInfo('A broadcast is currently active from another device.');
+        setBtnDisabled(true);
+      }
+    })
+    .catch(function() { /* server not responding yet — ignore */ });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "PLUGIN_NAME": "Intercom",
+  "SAVE": "Save",
+
+  "SECTION_SETTINGS": "Intercom Settings",
+
+  "SERVER_PORT": "Web Server Port",
+  "SERVER_PORT_DOC": "Port for the intercom web interface and WebSocket stream. Open http://<volumio-ip>:<port> on your phone. Requires plugin restart to take effect.",
+
+  "INTERCOM_GAIN": "Audio Gain",
+  "INTERCOM_GAIN_DOC": "Volume multiplier applied to the incoming audio (0.1 – 5.0). 1.0 = unity gain. Increase if your phone microphone is too quiet.",
+
+  "AUTO_RESUME": "Auto-Resume Playback",
+  "AUTO_RESUME_DOC": "Automatically resume Volumio playback when the broadcast ends. Works best with local library and MPD sources.",
+
+  "SAMPLE_RATE": "Sample Rate",
+  "SAMPLE_RATE_DOC": "Audio sample rate for the broadcast stream. 16000 Hz is recommended for voice. Higher rates use more bandwidth but improve audio quality.",
+
+  "TOAST_SETTINGS_SAVED": "Settings saved",
+  "TOAST_SETTINGS_SAVED_DESC": "Intercom settings have been saved"
+}
