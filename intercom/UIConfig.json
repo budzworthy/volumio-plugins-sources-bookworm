@@ -1,0 +1,68 @@
+{
+  "page": {
+    "label": "TRANSLATE.PLUGIN_NAME"
+  },
+  "sections": [
+    {
+      "id": "settings",
+      "element": "section",
+      "label": "TRANSLATE.SECTION_SETTINGS",
+      "icon": "fa-cogs",
+      "onSave": {
+        "type": "controller",
+        "endpoint": "system_controller/intercom",
+        "method": "saveSettings"
+      },
+      "saveButton": {
+        "label": "TRANSLATE.SAVE",
+        "data": [
+          "server_port",
+          "intercom_gain",
+          "auto_resume",
+          "sample_rate"
+        ]
+      },
+      "content": [
+        {
+          "id": "server_port",
+          "element": "input",
+          "type": "number",
+          "label": "TRANSLATE.SERVER_PORT",
+          "value": 8096,
+          "doc": "TRANSLATE.SERVER_PORT_DOC"
+        },
+        {
+          "id": "intercom_gain",
+          "element": "input",
+          "type": "number",
+          "label": "TRANSLATE.INTERCOM_GAIN",
+          "value": 1.0,
+          "doc": "TRANSLATE.INTERCOM_GAIN_DOC"
+        },
+        {
+          "id": "auto_resume",
+          "element": "switch",
+          "label": "TRANSLATE.AUTO_RESUME",
+          "value": true,
+          "doc": "TRANSLATE.AUTO_RESUME_DOC"
+        },
+        {
+          "id": "sample_rate",
+          "element": "select",
+          "label": "TRANSLATE.SAMPLE_RATE",
+          "value": {
+            "value": 16000,
+            "label": "16000 Hz (recommended for voice)"
+          },
+          "options": [
+            { "value": 8000,  "label": "8000 Hz (low bandwidth)" },
+            { "value": 16000, "label": "16000 Hz (recommended for voice)" },
+            { "value": 44100, "label": "44100 Hz (CD quality)" },
+            { "value": 48000, "label": "48000 Hz (studio quality)" }
+          ],
+          "doc": "TRANSLATE.SAMPLE_RATE_DOC"
+        }
+      ]
+    }
+  ]
+}
