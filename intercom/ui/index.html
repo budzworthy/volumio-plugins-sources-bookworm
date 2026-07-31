@@ -358,9 +358,12 @@ function startAudioCapture() {
     sourceNode.connect(analyserNode);
     sourceNode.connect(processorNode);
 
-    // Connect to destination — required by some browsers to keep the graph
-    // alive; this does NOT produce audible output (mono→stereo at 0 gain).
-    processorNode.connect(audioCtx.destination);
+    // Connect through a silent (gain=0) node to keep the Web Audio graph
+    // alive without routing microphone audio back to the phone's own speaker.
+    var silentGain = audioCtx.createGain();
+    silentGain.gain.value = 0;
+    processorNode.connect(silentGain);
+    silentGain.connect(audioCtx.destination);
 
     processorNode.onaudioprocess = function(e) {
       if (!isLive || !ws || ws.readyState !== WebSocket.OPEN) return;
